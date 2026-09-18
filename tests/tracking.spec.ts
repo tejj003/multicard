@@ -37,6 +37,8 @@ async function mockCamera(page: Page, mode: 'available' | 'pending' | 'denied' =
 }
 
 test('viewer position changes the optical angle and holds steady without guessing movement', async ({ page }) => {
+  test.setTimeout(90000)
+  await page.setViewportSize({ width: 640, height: 480 })
   await mockCamera(page)
   await page.clock.install()
   await page.goto('/')

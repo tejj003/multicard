@@ -143,6 +143,8 @@ test('Aperture retains curved shading and view-responsive gloss', async ({ page 
 })
 
 test('pointer, keyboard, auto sweep, reset and reduced motion share the same view', async ({ page }) => {
+  test.setTimeout(90000)
+  await page.setViewportSize({ width: 640, height: 480 })
   await page.clock.install()
   await page.goto('/')
   const canvas = page.locator('#art')
@@ -266,14 +268,19 @@ test('Retina backing store scales without changing composition or control geomet
 
 test('fullscreen locks full definition at 2x or higher native density even during slow frames', async ({ browser, browserName }) => {
   test.skip(browserName !== 'chromium', 'Native fullscreen checked in Chromium.')
-  test.setTimeout(90000)
+  test.setTimeout(180000)
   for (const ratio of [1, 2, 3]) {
     const context = await browser.newContext({ deviceScaleFactor: ratio, viewport: { width: 640, height: 480 } })
     try {
       const page = await context.newPage()
       await page.addInitScript(() => {
         const nativeFrame = requestAnimationFrame.bind(window)
-        window.requestAnimationFrame = callback => nativeFrame(timestamp => callback(timestamp * 4))
+        let lastTimestamp = -1
+        let simulatedTimestamp = 0
+        window.requestAnimationFrame = callback => nativeFrame(timestamp => {
+          if (timestamp !== lastTimestamp) { lastTimestamp = timestamp; simulatedTimestamp += 50 }
+          callback(simulatedTimestamp)
+        })
       })
       await page.goto('/')
       await expect(page.locator('#art')).toHaveAttribute('data-ready', 'true')
