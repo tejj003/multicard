@@ -36,14 +36,14 @@ export class ViewerTracker {
     this.setState('starting')
     this.timeout = window.setTimeout(() => { if (generation === this.generation) this.fail('Camera setup timed out. Check permissions and try again.') }, 30000)
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 30 } } })
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 24, max: 30 } } })
       if (generation !== this.generation || document.hidden) { stream.getTracks().forEach(track => track.stop()); return }
       this.stream = stream
       stream.getTracks().forEach(track => { track.onended = () => this.fail('The camera disconnected. Enable it again to continue tracking.') })
       this.video.srcObject = stream
       await this.video.play()
       if (generation !== this.generation) return
-      const worker = new Worker(`${import.meta.env.BASE_URL}tracking-worker.js`)
+      const worker = new Worker(`${import.meta.env.BASE_URL}tracking-worker.js?v=body-1`)
       this.worker = worker
       worker.onerror = () => { if (generation === this.generation) this.fail('The local tracker could not start. Mouse and touch are still available.') }
       worker.onmessage = event => {
@@ -79,7 +79,8 @@ export class ViewerTracker {
       const generation = this.generation
       const worker = this.worker
       this.frameTimeout = window.setTimeout(() => { if (generation === this.generation) this.fail('Camera analysis stalled. Restart viewer tracking to try again.') }, 5000)
-      void createImageBitmap(this.video, { resizeWidth: 320, resizeHeight: Math.round(320 * this.video.videoHeight / this.video.videoWidth) }).then(frame => {
+      const frameWidth = Math.min(640, this.video.videoWidth)
+      void createImageBitmap(this.video, { resizeWidth: frameWidth, resizeHeight: Math.round(frameWidth * this.video.videoHeight / this.video.videoWidth) }).then(frame => {
         if (generation !== this.generation) { frame.close(); return }
         worker.postMessage({ type: 'frame', frame, timestamp }, [frame])
       }).catch(() => { if (generation === this.generation) this.fail('Camera frames could not be read. Mouse and touch are still available.') })

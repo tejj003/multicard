@@ -1,4 +1,77 @@
 import { test, expect, type Page } from '@playwright/test'
+import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
+
+test('body worker uses torso landmarks and remaps small-body crops without requiring face landmarks', async () => {
+  type Landmark = { x: number; y: number; visibility: number }
+  const body = (centre: number, width = .2, visibility = 1) => {
+    const landmarks: Landmark[] = Array.from({ length: 33 }, () => ({ x: .05, y: .05, visibility: 0 }))
+    landmarks[11] = { x: centre - width / 2, y: .2, visibility }
+    landmarks[12] = { x: centre + width / 2, y: .2, visibility }
+    landmarks[23] = { x: centre - width / 3, y: .55, visibility }
+    landmarks[24] = { x: centre + width / 3, y: .55, visibility }
+    return landmarks
+  }
+  const outputs: { type: string; centre?: number | null; message?: string }[] = []
+  const cropped: number[][] = []
+  let options: unknown
+  let closed = 0
+  let failDetection = false
+  let detections: Landmark[][][] = []
+  const worker = {
+    location: { href: 'https://example.test/multicard/tracking-worker.js' },
+    postMessage: (message: typeof outputs[number]) => outputs.push(message),
+    onmessage: null as unknown as (event: { data: unknown }) => Promise<void>,
+  }
+  class CropCanvas {
+    width: number
+    height: number
+    constructor(width: number, height: number) { this.width = width; this.height = height }
+    getContext() { return { drawImage: (_frame: unknown, ...coordinates: number[]) => cropped.push(coordinates) } }
+  }
+  runInNewContext(readFileSync('public/tracking-worker.js', 'utf8'), {
+    self: worker, URL, importScripts: () => {}, OffscreenCanvas: CropCanvas,
+    Vision: {
+      FilesetResolver: { forVisionTasks: async (url: string) => { expect(url).toBe('https://example.test/multicard/tracking/wasm'); return {} } },
+      PoseLandmarker: { createFromOptions: async (_files: unknown, configuration: unknown) => {
+        options = configuration
+        return { detect: () => {
+          if (failDetection) throw new Error('Test inference failure')
+          return { landmarks: detections.shift() ?? [] }
+        } }
+      } },
+    },
+  })
+  await worker.onmessage({ data: { type: 'init' } })
+  expect(outputs.at(-1)).toEqual({ type: 'ready' })
+  expect(options).toMatchObject({
+    baseOptions: { modelAssetPath: 'https://example.test/multicard/tracking/pose-landmarker-lite.task', delegate: 'CPU' },
+    runningMode: 'IMAGE', numPoses: 3, outputSegmentationMasks: false,
+  })
+  const frame = { width: 640, height: 360, close: () => { closed++ } }
+  detections = [[body(.3)]]
+  await worker.onmessage({ data: { type: 'frame', frame } })
+  expect(outputs.at(-1)?.centre).toBeCloseTo(.3)
+  expect(cropped).toHaveLength(0)
+  detections = [[body(.2, .1), body(.7, .3)]]
+  await worker.onmessage({ data: { type: 'frame', frame } })
+  expect(outputs.at(-1)?.centre).toBeCloseTo(.7)
+  detections = [[], [body(.5)], [], []]
+  await worker.onmessage({ data: { type: 'frame', frame } })
+  expect(outputs.at(-1)?.centre).toBeCloseTo(.28125)
+  expect(cropped.map(coordinates => coordinates[0])).toEqual([0, 140, 280])
+  detections = [[], [], [], [body(.5)]]
+  await worker.onmessage({ data: { type: 'frame', frame } })
+  expect(outputs.at(-1)?.centre).toBeCloseTo(.71875)
+  const invalid = body(.5); invalid[11]!.x = NaN
+  detections = [[body(.4, .2, .2)], [invalid], [body(2)], []]
+  await worker.onmessage({ data: { type: 'frame', frame } })
+  expect(outputs.at(-1)).toEqual({ type: 'position', centre: null })
+  failDetection = true
+  await worker.onmessage({ data: { type: 'frame', frame } })
+  expect(outputs.at(-1)?.type).toBe('error')
+  expect(closed).toBe(6)
+})
 
 type Probe = { requests: MediaStreamConstraints[]; stops: number; terminated: number; closed: number; resolve: (() => void) | null; emit: (value: number | null) => void; disconnect: () => void }
 
@@ -47,9 +120,11 @@ test('viewer position changes the optical angle and holds steady without guessin
   expect(await page.evaluate(() => (window as unknown as { trackingProbe: Probe }).trackingProbe.requests)).toEqual([])
   await page.getByRole('button', { name: 'Enable viewer tracking' }).click()
   await expect(page.locator('#camera')).toHaveAttribute('data-state', 'searching')
+  await expect(page.locator('#tracking-status')).toHaveText('Camera on / finding body')
   const position = async (value: number | null) => { await page.evaluate(value => (window as unknown as { trackingProbe: Probe }).trackingProbe.emit(value), value); await page.clock.runFor(650) }
   await position(.5)
   await expect(page.locator('#camera')).toHaveAttribute('data-state', 'tracking')
+  await expect(page.locator('#tracking-status')).toHaveText('Body tracked / on-device')
   await position(.32)
   expect(Number(await page.locator('#art').getAttribute('data-view'))).toBeGreaterThan(.85)
   await position(.68)
@@ -74,7 +149,7 @@ test('viewer position changes the optical angle and holds steady without guessin
   await page.clock.runFor(800)
   await expect(page.locator('#camera')).toHaveAttribute('data-state', 'off')
   expect(Number(await page.locator('#art').getAttribute('data-view'))).toBeGreaterThan(.59)
-  expect(await page.evaluate(() => { const probe = (window as unknown as { trackingProbe: Probe }).trackingProbe; return { stops: probe.stops, terminated: probe.terminated, requests: probe.requests } })).toMatchObject({ stops: 1, terminated: 1, requests: [{ audio: false, video: { facingMode: 'user' } }] })
+  expect(await page.evaluate(() => { const probe = (window as unknown as { trackingProbe: Probe }).trackingProbe; return { stops: probe.stops, terminated: probe.terminated, requests: probe.requests } })).toMatchObject({ stops: 1, terminated: 1, requests: [{ audio: false, video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } }] })
 })
 
 test('fullscreen accepts only camera movement and returns manual control on exit', async ({ page, browserName }) => {

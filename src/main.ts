@@ -186,7 +186,7 @@ let tracker: ViewerTracker | undefined = new ViewerTracker(value => { scene?.set
   const label = pending ? 'Cancel viewer tracking' : active ? 'Stop viewer tracking' : 'Enable viewer tracking'
   cameraButton.setAttribute('aria-label', label); cameraButton.title = label
   cameraButton.innerHTML = `<i data-lucide="${active || pending ? 'camera-off' : 'camera'}"></i><span>${pending ? 'Connecting' : active ? 'Camera on' : 'Enable camera'}</span>`
-  document.querySelector('#tracking-status')!.textContent = state === 'tracking' ? 'Viewer tracked / on-device' : state === 'searching' ? 'Camera on / finding viewer' : pending ? 'Starting camera / local processing' : 'Pointer / touch'
+  document.querySelector('#tracking-status')!.textContent = state === 'tracking' ? 'Body tracked / on-device' : state === 'searching' ? 'Camera on / finding body' : pending ? 'Starting camera / local processing' : 'Pointer / touch'
   cameraError.hidden = !message; cameraError.textContent = message || ''
   icons()
 })
