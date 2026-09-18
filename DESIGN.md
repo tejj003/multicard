@@ -24,9 +24,10 @@ Normal gallery grids use four columns/three rows in landscape and three columns/
 ## Interaction And Quality
 
 - Smooth view changes use exponential damping, not fixed per-frame lerp.
-- A detected face's first centre calibrates the origin; no identity is inferred. The largest face controls the piece. Missing detections hold the last state and expose manual input.
+- A detected face's first centre calibrates the origin; no identity is inferred. The largest face controls the piece. Missing detections hold the last state; manual fallback is available only in the gallery.
 - Camera analysis runs in a worker, transfers only the current low-resolution bitmap and closes it after processing. No frames leave the machine.
-- Manual slider/keyboard and Auto mode override camera tracking explicitly; Centre view recalibrates it.
+- In the gallery, manual slider/keyboard and Auto mode override camera tracking explicitly; Centre view recalibrates it.
+- Fullscreen movement is camera-only. Entry stops automatic sweep and freezes the current view before accepting further camera positions. Pointer/touch, slider/reset, Left/Right and Space cannot change the angle or interrupt capture while fullscreen. Camera-off, denied, disconnected or searching states hold still without manual fallback. Up/Down artwork selection, C camera stop and Escape exit remain available; no new visible fullscreen controls or automatic permission requests. Exit restores gallery controls without restarting sweep or capture.
 - The scene has one shader pass, no post-processing chain and no external art textures. Normal gallery DPR uses adaptive Auto, capped at 2x. The latest fullscreen definition request overrides that: fullscreen locks `max(native DPR, 2)` without performance-driven reduction, even if the gallery previously dropped to 1x. GPU dimension limits may constrain it only with a visible actual-resolution notice. Preserve composition and CSS-space input. Shader derivatives handle edges without redundant multisampling; definition takes priority over frame rate in fullscreen.
 - Reduced motion disables auto movement and removes damping for deliberate inputs. Geometry remains sharp.
 - Test actual pixel differences and screenshots, not only data attributes. Confirm fonts and shader compilation, 1x/2x sizing, small-screen control bounds and camera cleanup.

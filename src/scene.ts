@@ -43,6 +43,7 @@ export class LenticularScene {
   }
   setPiece(index: number) { this.material.uniforms.uPiece!.value = index; this.canvas.dataset.piece = String(index); this.dirty = true }
   setView(value: number) { this.target = Math.max(-1, Math.min(1, value)); this.dirty = true }
+  holdView() { this.target = this.view }
   setAuto(enabled: boolean) { this.auto = enabled; this.time = Math.asin(this.view / 1.01); this.dirty = true }
   private onLost = (event: Event) => { event.preventDefault(); this.lost = true; this.onError('Graphics paused. Restoring the artwork...') }
   private onRestored = () => { this.lost = false; this.onError(''); this.resize() }

@@ -62,11 +62,17 @@ test('Vortex blends colour palettes with viewing angle and restores its centre v
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
       const centre = await canvas.evaluate((element: HTMLCanvasElement) => element.toDataURL())
       for (const angle of [-90, 0, 90, 0]) {
-        await page.locator('#angle').evaluate((input: HTMLInputElement, value) => {
-          input.value = String(value)
-          input.dispatchEvent(new Event('input', { bubbles: true }))
-        }, angle)
+        if (fullscreen) {
+          await page.keyboard.press('Escape')
+          await expect(canvas).toHaveAttribute('data-presentation', 'gallery')
+        }
+        await page.locator('#angle').fill(String(angle))
         await expect(canvas).toHaveAttribute('data-view', (angle / 100).toFixed(4))
+        if (fullscreen) {
+          await page.getByRole('button', { name: 'Enter fullscreen' }).click()
+          await expect(canvas).toHaveAttribute('data-quality', 'full-definition')
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+        }
         const colour = await canvas.evaluate((element: HTMLCanvasElement) => {
           const snapshot = document.createElement('canvas'); snapshot.width = 128; snapshot.height = 128
           const context = snapshot.getContext('2d')!
@@ -306,9 +312,13 @@ test('fullscreen locks full definition at 2x or higher native density even durin
       expect(before.height).toBe(Math.floor(before.cssHeight * expected))
       expect(before.gpuWidth).toBe(before.width)
       expect(before.gpuHeight).toBe(before.height)
+      await expect(page.locator('#auto')).toHaveAttribute('aria-pressed', 'false')
       await page.evaluate(() => new Promise<void>(resolve => {
         let remaining = 110
-        const frame = () => { if (--remaining) requestAnimationFrame(frame); else resolve() }
+        const frame = () => {
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+          if (--remaining) requestAnimationFrame(frame); else resolve()
+        }
         requestAnimationFrame(frame)
       }))
       expect(await measure()).toEqual(before)

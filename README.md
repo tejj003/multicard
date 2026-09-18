@@ -49,18 +49,18 @@ Use the preview server rather than a `file://` URL; the module worker and model 
 
 - The info icon beside the artwork title opens a distinct artist's statement for the selected piece. Close it with Escape, the close icon or a click outside; focus returns to the info icon. Artwork keyboard shortcuts are inactive while the statement is open. Fullscreen remains artwork-only.
 - Move the mouse horizontally, drag a finger, or use the viewing-angle slider.
-- Left/Right arrow keys adjust angle when the artwork has focus. Up/Down select the previous/next piece. Space starts/stops a slow automatic sweep.
-- Fullscreen hides the entire interface. Escape exits; keyboard and camera input still work. The C key stops camera capture in fullscreen.
+- In the gallery, Left/Right arrow keys adjust angle when the artwork has focus, and Space starts/stops a slow automatic sweep. Up/Down select the previous/next piece in either mode.
+- Fullscreen hides the interface and accepts only camera-driven movement. Enable camera and approve permission in the gallery before entering. Mouse/touch movement, the angle slider, Left/Right and Space cannot animate the fullscreen artwork. Entry stops auto sweep and any unfinished manual movement; without a tracked viewer, the image holds still. Escape exits, Up/Down change the selected piece, and C stops camera capture. Manual controls return after exiting; camera access never starts automatically.
 - Fullscreen fills the display with the pattern at any aspect ratio. Aperture and Orbit add rows/columns along the longer dimension, with partial edge cells where the pattern continues beyond the screen. Ribbon extends edge-to-edge. Shapes retain their proportions; normal gallery framing returns on exit.
 - Fullscreen Aperture uses a denser arrangement of medium-sized chambers: five rows on landscape screens and four columns on portrait screens, with additional cells along the other dimension. At 1440x900 this is nine columns by five rows, including partial edge cells. Silhouettes use tighter pixel antialiasing and contact shadows while keeping the curved glossy material. The normal twelve-chamber composition and the other artworks are unchanged.
 - Centre view resets the angle and recalibrates the next detected camera position.
-- Auto sweep is optional, starts off, stops on page hiding, and does not run under reduced motion. Direct deliberate angle changes still work without interpolation under reduced motion.
+- Auto sweep is optional in the gallery, starts off, stops on page hiding or fullscreen entry, and does not run under reduced motion. Direct deliberate angle changes still work without interpolation under reduced motion.
 
 ## Viewer Tracking
 
 Choose Enable camera and approve the browser permission. The first detected face sets the centre. Moving horizontally changes the view with mirror-style mapping and time-based smoothing. Holding still holds the angle. The largest visible face controls the artwork; this is not identity recognition and not multi-viewer tracking.
 
-MediaPipe BlazeFace runs in a dedicated classic worker at up to 10 frames/second on resized 320px-wide frames, leaving the WebGL rendering on the main thread. If no viewer is detected, the last angle is held and pointer/touch input becomes available. Use Centre view to recalibrate after moving the camera or changing viewer position.
+MediaPipe BlazeFace runs in a dedicated classic worker at up to 10 frames/second on resized 320px-wide frames, leaving the WebGL rendering on the main thread. If no viewer is detected, the last angle is held. Pointer/touch fallback is available only in the gallery, never in fullscreen. Exit fullscreen to restart capture after stopping, denial or disconnection. Use Centre view in the gallery to recalibrate after moving the camera or changing viewer position.
 
 Only video is requested. No microphone, recording, identity data, storage, analytics, uploads, external recognition or paid service is used. The runtime, model, fonts and artwork are served locally. Frames are transferred to the worker and closed after analysis. Stop, page hiding, page exit, camera disconnection, timeout or graphics-context loss releases the stream and worker. Late permission responses are discarded and stopped.
 

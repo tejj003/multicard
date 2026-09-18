@@ -90,7 +90,12 @@ let scene: LenticularScene | undefined
 let auto = false
 let currentPiece = 0
 
+function cameraOnly() { return document.fullscreenElement === app }
+document.addEventListener('fullscreenchange', () => {
+  if (cameraOnly()) { setAuto(false); scene?.holdView() }
+})
 function setAuto(enabled: boolean) {
+  if (enabled && cameraOnly()) return
   if (enabled) tracker?.stop()
   const next = enabled && !matchMedia('(prefers-reduced-motion: reduce)').matches
   if (next === auto) return
@@ -132,10 +137,16 @@ try {
   document.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input').forEach(control => { control.disabled = true })
 }
 selectPiece(0)
-function setAngle(value: number) { setAuto(false); scene?.setView(value) }
-slider.addEventListener('input', () => { tracker?.stop(); setAngle(Number(slider.value) / 100) })
+function setAngle(value: number) {
+  if (cameraOnly()) return
+  setAuto(false); scene?.setView(value)
+}
+slider.addEventListener('input', () => {
+  if (cameraOnly()) return
+  tracker?.stop(); setAngle(Number(slider.value) / 100)
+})
 canvas.addEventListener('pointermove', event => {
-  if (document.body.dataset.input === 'camera') return
+  if (cameraOnly() || document.body.dataset.input === 'camera') return
   const bounds = canvas.getBoundingClientRect()
   setAngle((event.clientX - bounds.left) / bounds.width * 2 - 1)
 })
@@ -144,6 +155,7 @@ document.addEventListener('keydown', event => {
   if (statement.open) return
   if (event.target instanceof HTMLElement && event.target.matches('input, button, a')) return
   if (event.altKey || event.ctrlKey || event.metaKey) return
+  if (cameraOnly() && ['ArrowLeft', 'ArrowRight', ' '].includes(event.key)) { event.preventDefault(); return }
   if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); tracker?.stop(); setAngle(Number(slider.value) / 100 + (event.key === 'ArrowRight' ? .12 : -.12)) }
   if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); selectPiece((currentPiece + (event.key === 'ArrowDown' ? 1 : pieces.length - 1)) % pieces.length) }
   if (event.key === ' ') { event.preventDefault(); setAuto(!auto) }
@@ -167,6 +179,7 @@ const cameraError = document.querySelector<HTMLElement>('#camera-error')!
 let tracker: ViewerTracker | undefined = new ViewerTracker(value => { scene?.setView(value) }, (state, message) => {
   const active = state === 'tracking' || state === 'searching'
   const pending = state === 'starting'
+  if (cameraOnly() && state !== 'tracking') scene?.holdView()
   document.body.dataset.input = state === 'tracking' ? 'camera' : 'pointer'
   cameraButton.dataset.state = state
   cameraButton.setAttribute('aria-pressed', String(active))
@@ -182,7 +195,7 @@ cameraButton.addEventListener('click', () => {
   else { setAuto(false); void tracker?.start() }
 })
 canvas.addEventListener('webglcontextlost', () => { setAuto(false); tracker?.stop() })
-document.querySelector('#reset')!.addEventListener('click', () => tracker?.calibrate())
-slider.addEventListener('pointerdown', () => tracker?.stop())
+document.querySelector('#reset')!.addEventListener('click', () => { if (!cameraOnly()) tracker?.calibrate() })
+slider.addEventListener('pointerdown', () => { if (!cameraOnly()) tracker?.stop() })
 document.addEventListener('keydown', event => { if (event.code === 'KeyC' && document.fullscreenElement && !event.repeat) tracker?.stop() })
 if (import.meta.hot) import.meta.hot.dispose(() => { tracker?.dispose(); scene?.dispose() })
