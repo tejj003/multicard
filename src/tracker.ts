@@ -1,7 +1,10 @@
 export type TrackingState = 'off' | 'starting' | 'searching' | 'tracking' | 'error'
+export type TrackingMode = 'body' | 'face'
 
 export class ViewerTracker {
   state: TrackingState = 'off'
+  mode: TrackingMode = 'body'
+  source: 'body' | 'face' | 'hand' | null = null
   private stream: MediaStream | null = null
   private worker: Worker | null = null
   private video = document.createElement('video')
@@ -12,6 +15,8 @@ export class ViewerTracker {
   private sampled = 0
   private busy = false
   private centre: number | null = null
+  private origin = 0
+  private value = 0
   private lastSeen = 0
   private onView: (value: number) => void
   private onState: (state: TrackingState, message?: string) => void
@@ -26,7 +31,14 @@ export class ViewerTracker {
   private onVisibility = () => { if (document.hidden) this.stop() }
   private onPageHide = () => this.stop()
   private fail(message: string) { this.stop(); this.setState('error', message) }
-  calibrate() { this.centre = null; if (this.stream) this.setState('searching') }
+  calibrate() { this.centre = null; this.source = null; this.origin = 0; this.value = 0; if (this.stream) this.setState('searching') }
+  setMode(mode: TrackingMode) {
+    if (mode === this.mode) return
+    const active = ['starting', 'searching', 'tracking'].includes(this.state)
+    this.mode = mode
+    if (active) void this.start()
+    else this.stop()
+  }
 
   async start() {
     this.stop()
@@ -43,7 +55,7 @@ export class ViewerTracker {
       this.video.srcObject = stream
       await this.video.play()
       if (generation !== this.generation) return
-      const worker = new Worker(`${import.meta.env.BASE_URL}tracking-worker.js?v=body-1`)
+      const worker = new Worker(`${import.meta.env.BASE_URL}tracking-worker.js?v=modes-1`)
       this.worker = worker
       worker.onerror = () => { if (generation === this.generation) this.fail('The local tracker could not start. Mouse and touch are still available.') }
       worker.onmessage = event => {
@@ -56,15 +68,19 @@ export class ViewerTracker {
           clearTimeout(this.frameTimeout)
           this.busy = false
           const centre = event.data.centre
-          if (typeof centre === 'number' && Number.isFinite(centre)) {
-            if (this.centre === null) this.centre = centre
+          if (typeof centre === 'number' && Number.isFinite(centre) && centre >= 0 && centre <= 1) {
+            const source = this.mode === 'body' ? 'body' : event.data.source === 'hand' ? 'hand' : 'face'
+            const changed = source !== this.source
+            if (this.centre === null || changed) { this.centre = centre; this.origin = this.value }
+            this.source = source
             this.lastSeen = performance.now()
-            this.onView(Math.max(-1, Math.min(1, (this.centre - centre) * 5)))
-            if (this.state !== 'tracking') this.setState('tracking')
+            this.value = Math.max(-1, Math.min(1, this.origin + (this.centre - centre) * 5))
+            this.onView(this.value)
+            if (this.state !== 'tracking' || changed) this.setState('tracking')
           } else if (performance.now() - this.lastSeen > 900 && this.state !== 'searching') this.setState('searching')
         } else if (event.data.type === 'error') this.fail(event.data.message)
       }
-      worker.postMessage({ type: 'init' })
+      worker.postMessage({ type: 'init', mode: this.mode })
     } catch (error) {
       if (generation !== this.generation) return
       this.fail(error instanceof DOMException && error.name === 'NotAllowedError'
@@ -95,6 +111,7 @@ export class ViewerTracker {
     this.stream = null
     this.video.pause(); this.video.srcObject = null
     this.busy = false; this.centre = null; this.sampled = 0; this.lastSeen = 0
+    this.source = null; this.origin = 0; this.value = 0
     this.setState('off')
   }
   dispose() { this.stop(); document.removeEventListener('visibilitychange', this.onVisibility); window.removeEventListener('pagehide', this.onPageHide) }

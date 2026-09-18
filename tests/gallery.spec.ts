@@ -181,6 +181,34 @@ test('pointer, keyboard, auto sweep, reset and reduced motion share the same vie
   await expect(canvas).toHaveAttribute('data-view', '-0.6000')
 })
 
+test('camera mode selector fits the header and supports keyboard selection', async ({ page }, testInfo) => {
+  await page.goto('/')
+  await page.evaluate(() => document.fonts.ready)
+  for (const [width, height] of [[1440, 1000], [901, 768], [768, 768], [640, 480], [390, 844], [320, 640]]) {
+    await page.setViewportSize({ width, height })
+    const boxes = await page.locator('.identity, .tracking-modes, .header-tools').evaluateAll(elements => elements.map(element => {
+      const bounds = element.getBoundingClientRect()
+      return { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom }
+    }))
+    for (const [index, bounds] of boxes.entries()) {
+      expect(bounds.left).toBeGreaterThanOrEqual(0)
+      expect(bounds.right).toBeLessThanOrEqual(width)
+      for (const other of boxes.slice(index + 1)) expect(bounds.right <= other.left || other.right <= bounds.left || bounds.bottom <= other.top || other.bottom <= bounds.top).toBe(true)
+    }
+    await page.getByRole('radio', { name: 'Body', exact: true }).focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(page.getByRole('radio', { name: 'Face + Hands', exact: true })).toBeChecked()
+    await expect(page.locator('#art')).toHaveAttribute('data-piece', '0')
+    await page.keyboard.press('ArrowLeft')
+    await expect(page.getByRole('radio', { name: 'Body', exact: true })).toBeChecked()
+    await page.getByRole('button', { name: 'Fold', exact: true }).click()
+    await page.locator('#angle').fill('90')
+    await expect.poll(async () => Number(await page.locator('#art').getAttribute('data-view'))).toBeGreaterThan(.89)
+    await page.screenshot({ path: testInfo.outputPath(`modes-${width}.png`) })
+    await page.getByRole('button', { name: 'Aperture', exact: true }).click()
+  }
+})
+
 test('interface passes accessibility checks and opens with the camera off', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/')

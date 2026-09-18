@@ -6,5 +6,7 @@ const target = resolve('public/tracking')
 await mkdir(target, { recursive: true })
 await cp(`${source}/vision_bundle.js`, `${target}/vision_bundle.js`)
 await cp(`${source}/wasm`, `${target}/wasm`, { recursive: true })
-await access(`${target}/pose-landmarker-lite.task`).catch(() => { throw new Error('Local body model is missing. Restore public/tracking/pose-landmarker-lite.task; see README.md.') })
+for (const model of ['pose-landmarker-lite.task', 'blaze-face.tflite', 'hand-landmarker.task']) {
+	await access(`${target}/${model}`).catch(() => { throw new Error(`Local tracking model is missing: public/tracking/${model}; see README.md.`) })
+}
 console.log('Local tracking runtime prepared. No camera or network access performed.')

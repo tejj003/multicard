@@ -73,11 +73,57 @@ test('body worker uses torso landmarks and remaps small-body crops without requi
   expect(closed).toBe(6)
 })
 
-type Probe = { requests: MediaStreamConstraints[]; stops: number; terminated: number; closed: number; resolve: (() => void) | null; emit: (value: number | null) => void; disconnect: () => void }
+test('face mode loads only face and hand models and prefers a valid palm over a face', async () => {
+  const outputs: { type: string; centre?: number | null; source?: string }[] = []
+  const models: string[] = []
+  let faceCalls = 0
+  let closed = 0
+  let handLandmarks: { x: number; y: number }[][] = []
+  let faces = [{ boundingBox: { originX: 100, width: 100, height: 100 } }, { boundingBox: { originX: 320, width: 160, height: 180 } }]
+  const worker = {
+    location: { href: 'https://example.test/multicard/tracking-worker.js?v=modes-1' },
+    postMessage: (message: typeof outputs[number]) => outputs.push(message),
+    onmessage: null as unknown as (event: { data: unknown }) => Promise<void>,
+  }
+  runInNewContext(readFileSync('public/tracking-worker.js', 'utf8'), {
+    self: worker, URL, importScripts: () => {},
+    Vision: {
+      FilesetResolver: { forVisionTasks: async () => ({}) },
+      PoseLandmarker: { createFromOptions: () => { throw new Error('Body model must not load') } },
+      FaceDetector: { createFromOptions: async (_files: unknown, options: { baseOptions: { modelAssetPath: string } }) => {
+        models.push(options.baseOptions.modelAssetPath)
+        return { detect: () => { faceCalls++; return { detections: faces } } }
+      } },
+      HandLandmarker: { createFromOptions: async (_files: unknown, options: { baseOptions: { modelAssetPath: string } }) => {
+        models.push(options.baseOptions.modelAssetPath)
+        return { detect: () => ({ landmarks: handLandmarks }) }
+      } },
+    },
+  })
+  await worker.onmessage({ data: { type: 'init', mode: 'face' } })
+  expect(outputs.at(-1)).toEqual({ type: 'ready' })
+  expect(models).toEqual(['https://example.test/multicard/tracking/blaze-face.tflite', 'https://example.test/multicard/tracking/hand-landmarker.task'])
+  const frame = { width: 640, height: 360, close: () => { closed++ } }
+  await worker.onmessage({ data: { type: 'frame', frame } })
+  expect(outputs.at(-1)).toEqual({ type: 'position', centre: .625, source: 'face' })
+  handLandmarks = [Array.from({ length: 21 }, () => ({ x: .4, y: .5 }))]
+  await worker.onmessage({ data: { type: 'frame', frame } })
+  expect(outputs.at(-1)).toEqual({ type: 'position', centre: .4, source: 'hand' })
+  expect(faceCalls).toBe(1)
+  handLandmarks[0]![9]!.x = NaN
+  await worker.onmessage({ data: { type: 'frame', frame } })
+  expect(outputs.at(-1)?.source).toBe('face')
+  faces = []
+  await worker.onmessage({ data: { type: 'frame', frame } })
+  expect(outputs.at(-1)?.centre).toBeNull()
+  expect(closed).toBe(4)
+})
+
+type Probe = { requests: MediaStreamConstraints[]; modes: string[]; stops: number; terminated: number; closed: number; resolve: (() => void) | null; emit: (value: number | null, source?: string) => void; disconnect: () => void }
 
 async function mockCamera(page: Page, mode: 'available' | 'pending' | 'denied' = 'available') {
   await page.addInitScript(mode => {
-    const probe = { requests: [] as MediaStreamConstraints[], stops: 0, terminated: 0, closed: 0, resolve: null as (() => void) | null, emit: (_value: number | null) => {}, disconnect: () => {} }
+    const probe = { requests: [] as MediaStreamConstraints[], modes: [] as string[], stops: 0, terminated: 0, closed: 0, resolve: null as (() => void) | null, emit: (_value: number | null, _source?: string) => {}, disconnect: () => {} }
     Object.defineProperty(window, 'trackingProbe', { value: probe })
     const track = { onended: null as (() => void) | null, stop() { probe.stops++ } }
     const stream = { getTracks: () => [track] }
@@ -98,9 +144,9 @@ async function mockCamera(page: Page, mode: 'available' | 'pending' | 'denied' =
     class FakeWorker {
       onmessage: ((event: { data: unknown }) => void) | null = null
       onerror: (() => void) | null = null
-      constructor() { probe.emit = centre => this.onmessage?.({ data: { type: 'position', centre } }) }
-      postMessage(message: { type: string; frame?: ImageBitmap }) {
-        if (message.type === 'init') queueMicrotask(() => this.onmessage?.({ data: { type: 'ready' } }))
+      constructor() { probe.emit = (centre, source) => this.onmessage?.({ data: { type: 'position', centre, source } }) }
+      postMessage(message: { type: string; frame?: ImageBitmap; mode?: string }) {
+        if (message.type === 'init') { probe.modes.push(message.mode!); queueMicrotask(() => this.onmessage?.({ data: { type: 'ready' } })) }
         else { message.frame?.close(); queueMicrotask(() => probe.emit(null)) }
       }
       terminate() { probe.terminated++; this.onmessage = null }
@@ -108,6 +154,82 @@ async function mockCamera(page: Page, mode: 'available' | 'pending' | 'denied' =
     Object.defineProperty(window, 'Worker', { configurable: true, value: FakeWorker })
   }, mode)
 }
+
+test('tracking modes load only on opt-in and hand off between face and hand without jumps', async ({ page, browserName }) => {
+  await page.setViewportSize({ width: 640, height: 480 })
+  await mockCamera(page)
+  await page.clock.install()
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/')
+  const canvas = page.locator('#art')
+  await expect(canvas).toHaveAttribute('data-ready', 'true')
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100))
+  await expect(page.getByRole('radio', { name: 'Body', exact: true })).toBeChecked()
+  await page.getByRole('radio', { name: 'Face + Hands', exact: true }).check()
+  expect(await page.evaluate(() => (window as unknown as { trackingProbe: Probe }).trackingProbe.requests.length)).toBe(0)
+  await page.getByRole('button', { name: 'Enable viewer tracking' }).click()
+  await expect(page.locator('#tracking-status')).toHaveText('Camera on / finding face or hand')
+  const position = async (centre: number, source: string) => {
+    await page.evaluate(({ centre, source }) => (window as unknown as { trackingProbe: Probe }).trackingProbe.emit(centre, source), { centre, source })
+    await page.clock.runFor(50)
+  }
+  await position(.5, 'face')
+  await position(.4, 'face')
+  await expect(canvas).toHaveAttribute('data-view', '0.5000')
+  await expect(page.locator('#tracking-status')).toHaveText('Face tracked / on-device')
+  await position(.8, 'hand')
+  await expect(canvas).toHaveAttribute('data-view', '0.5000')
+  await expect(page.locator('#tracking-status')).toHaveText('Hand tracked / on-device')
+  await position(.9, 'hand')
+  await expect(canvas).toHaveAttribute('data-view', '0.0000')
+  await position(.35, 'face')
+  await expect(canvas).toHaveAttribute('data-view', '0.0000')
+  await position(.45, 'face')
+  await expect(canvas).toHaveAttribute('data-view', '-0.5000')
+  if (browserName === 'chromium') {
+    await page.getByRole('button', { name: 'Enter fullscreen' }).click()
+    await expect(canvas).toHaveAttribute('data-presentation', 'full-bleed')
+    await expect(page.getByRole('group', { name: 'Camera tracking mode' })).not.toBeVisible()
+    await position(.4, 'hand')
+    await expect(canvas).toHaveAttribute('data-view', '-0.5000')
+    await position(.2, 'hand')
+    await expect(canvas).toHaveAttribute('data-view', '0.5000')
+    await canvas.dispatchEvent('pointermove', { clientX: 630, clientY: 200 })
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('Space')
+    await page.clock.runFor(50)
+    await expect(canvas).toHaveAttribute('data-view', '0.5000')
+    await expect(page.locator('#tracking-status')).toHaveText('Hand tracked / on-device')
+    await page.keyboard.press('Escape')
+    await expect(canvas).toHaveAttribute('data-presentation', 'gallery')
+  }
+  await page.getByRole('radio', { name: 'Body', exact: true }).check()
+  await expect(page.locator('#tracking-status')).toHaveText('Camera on / finding body')
+  await position(.5, 'body')
+  await position(.4, 'body')
+  await expect(canvas).toHaveAttribute('data-view', '0.5000')
+  expect(await page.evaluate(() => {
+    const probe = (window as unknown as { trackingProbe: Probe }).trackingProbe
+    return { modes: probe.modes, requests: probe.requests.length, stops: probe.stops, terminated: probe.terminated }
+  })).toEqual({ modes: ['face', 'body'], requests: 2, stops: 1, terminated: 1 })
+  await page.getByRole('button', { name: 'Stop viewer tracking' }).click()
+  await page.getByRole('radio', { name: 'Face + Hands', exact: true }).check()
+  expect(await page.evaluate(() => (window as unknown as { trackingProbe: Probe }).trackingProbe.requests.length)).toBe(2)
+})
+
+test('switching modes cancels a pending stream and never starts its old worker', async ({ page }) => {
+  await mockCamera(page, 'pending')
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Enable viewer tracking' }).click()
+  await page.evaluate(() => { const probe = (window as unknown as { trackingProbe: Probe }).trackingProbe; Object.defineProperty(window, 'oldCameraResolve', { value: probe.resolve }) })
+  await page.getByRole('radio', { name: 'Face + Hands', exact: true }).check()
+  await page.evaluate(() => (window as unknown as { oldCameraResolve: () => void }).oldCameraResolve())
+  expect(await page.evaluate(() => (window as unknown as { trackingProbe: Probe }).trackingProbe.stops)).toBe(1)
+  await expect(page.locator('#camera')).toHaveAttribute('data-state', 'starting')
+  await page.evaluate(() => (window as unknown as { trackingProbe: Probe }).trackingProbe.resolve?.())
+  await expect(page.locator('#tracking-status')).toHaveText('Camera on / finding face or hand')
+  expect(await page.evaluate(() => (window as unknown as { trackingProbe: Probe }).trackingProbe.modes)).toEqual(['face'])
+})
 
 test('viewer position changes the optical angle and holds steady without guessing movement', async ({ page }) => {
   test.setTimeout(90000)

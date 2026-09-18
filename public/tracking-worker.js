@@ -1,4 +1,6 @@
 let detector = null
+let hands = null
+let mode = 'body'
 let busy = false
 let crop = null
 function bodyCandidates(result, offsetX = 0, offsetY = 0, scaleX = 1, scaleY = 1) {
@@ -16,15 +18,28 @@ function bodyCandidates(result, offsetX = 0, offsetY = 0, scaleX = 1, scaleY = 1
 self.onmessage = async event => {
   if (event.data.type === 'init') {
     try {
+      mode = event.data.mode === 'face' ? 'face' : 'body'
       importScripts('./tracking/vision_bundle.js')
       const files = await Vision.FilesetResolver.forVisionTasks(new URL('./tracking/wasm', self.location.href).href)
-      detector = await Vision.PoseLandmarker.createFromOptions(files, {
-        baseOptions: { modelAssetPath: new URL('./tracking/pose-landmarker-lite.task', self.location.href).href, delegate: 'CPU' },
-        runningMode: 'IMAGE', numPoses: 3, minPoseDetectionConfidence: .5,
-        minPosePresenceConfidence: .5, minTrackingConfidence: .5, outputSegmentationMasks: false,
-      })
+      if (mode === 'body') {
+        detector = await Vision.PoseLandmarker.createFromOptions(files, {
+          baseOptions: { modelAssetPath: new URL('./tracking/pose-landmarker-lite.task', self.location.href).href, delegate: 'CPU' },
+          runningMode: 'IMAGE', numPoses: 3, minPoseDetectionConfidence: .5,
+          minPosePresenceConfidence: .5, minTrackingConfidence: .5, outputSegmentationMasks: false,
+        })
+      } else {
+        detector = await Vision.FaceDetector.createFromOptions(files, {
+          baseOptions: { modelAssetPath: new URL('./tracking/blaze-face.tflite', self.location.href).href, delegate: 'CPU' },
+          runningMode: 'IMAGE', minDetectionConfidence: .6,
+        })
+        hands = await Vision.HandLandmarker.createFromOptions(files, {
+          baseOptions: { modelAssetPath: new URL('./tracking/hand-landmarker.task', self.location.href).href, delegate: 'CPU' },
+          runningMode: 'IMAGE', numHands: 1, minHandDetectionConfidence: .6,
+          minHandPresenceConfidence: .6, minTrackingConfidence: .5,
+        })
+      }
       self.postMessage({ type: 'ready' })
-    } catch { self.postMessage({ type: 'error', message: 'The local body tracker could not load. Exit fullscreen to retry or use the gallery controls.' }) }
+    } catch { self.postMessage({ type: 'error', message: 'The selected camera tracker could not load. Exit fullscreen to retry or use the gallery controls.' }) }
     return
   }
   const frame = event.data.frame
@@ -32,6 +47,24 @@ self.onmessage = async event => {
   if (!detector || busy) { frame.close(); self.postMessage({ type: 'position', centre: null }); return }
   busy = true
   try {
+    if (mode === 'face') {
+      const hand = hands.detect(frame).landmarks[0]
+      const palm = hand ? [0, 5, 9, 13, 17].map(index => hand[index]) : []
+      if (palm.length && palm.every(point => point && Number.isFinite(point.x) && point.x >= 0 && point.x <= 1 && Number.isFinite(point.y) && point.y >= 0 && point.y <= 1)) {
+        const centre = palm.reduce((total, point) => total + point.x, 0) / palm.length
+        self.postMessage({ type: 'position', centre, source: 'hand' })
+        return
+      }
+      const faces = detector.detect(frame).detections.filter(detection => {
+        const bounds = detection.boundingBox
+        return bounds && Number.isFinite(bounds.originX) && Number.isFinite(bounds.width) && Number.isFinite(bounds.height) && bounds.width > 0 && bounds.height > 0
+      })
+      faces.sort((first, second) => second.boundingBox.width * second.boundingBox.height - first.boundingBox.width * first.boundingBox.height)
+      const bounds = faces[0]?.boundingBox
+      const centre = bounds ? (bounds.originX + bounds.width / 2) / frame.width : null
+      self.postMessage({ type: 'position', centre: centre !== null && centre >= 0 && centre <= 1 ? centre : null, source: 'face' })
+      return
+    }
     const result = detector.detect(frame)
     const bodies = bodyCandidates(result)
     const size = Math.min(frame.width, frame.height)
@@ -47,6 +80,6 @@ self.onmessage = async event => {
     }
     bodies.sort((first, second) => second.area - first.area)
     self.postMessage({ type: 'position', centre: bodies[0]?.centre ?? null })
-  } catch { self.postMessage({ type: 'error', message: 'Body tracking stopped. Exit fullscreen to restart the camera.' }) }
+  } catch { self.postMessage({ type: 'error', message: 'Camera tracking stopped. Exit fullscreen to restart the camera.' }) }
   finally { frame.close(); busy = false }
 }

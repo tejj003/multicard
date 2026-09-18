@@ -36,6 +36,10 @@ const pieces = [
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <header class="header">
     <a class="identity" href="./" aria-label="MultiCard home"><span class="brand">MultiCard<span class="brand-dot">.</span></span><span class="byline">Art by Tejj</span></a>
+    <fieldset class="tracking-modes" aria-label="Camera tracking mode">
+      <label title="Body tracking for the exhibit"><input type="radio" name="tracking-mode" value="body" checked><span>Body</span></label>
+      <label title="Face and hand tracking for close-up use"><input type="radio" name="tracking-mode" value="face"><span>Face + Hands</span></label>
+    </fieldset>
     <div class="header-tools">
       <button id="camera" class="camera-button" aria-label="Enable viewer tracking" aria-pressed="false" title="Enable viewer tracking"><i data-lucide="camera"></i><span>Enable camera</span></button>
       <button id="fullscreen" class="icon-button" aria-label="Enter fullscreen" title="Enter fullscreen"><i data-lucide="expand"></i></button>
@@ -186,10 +190,16 @@ let tracker: ViewerTracker | undefined = new ViewerTracker(value => { scene?.set
   const label = pending ? 'Cancel viewer tracking' : active ? 'Stop viewer tracking' : 'Enable viewer tracking'
   cameraButton.setAttribute('aria-label', label); cameraButton.title = label
   cameraButton.innerHTML = `<i data-lucide="${active || pending ? 'camera-off' : 'camera'}"></i><span>${pending ? 'Connecting' : active ? 'Camera on' : 'Enable camera'}</span>`
-  document.querySelector('#tracking-status')!.textContent = state === 'tracking' ? 'Body tracked / on-device' : state === 'searching' ? 'Camera on / finding body' : pending ? 'Starting camera / local processing' : 'Pointer / touch'
+  const subject = tracker?.mode === 'face' ? tracker.source === 'hand' ? 'Hand' : 'Face' : 'Body'
+  const searching = tracker?.mode === 'face' ? 'face or hand' : 'body'
+  document.querySelector('#tracking-status')!.textContent = state === 'tracking' ? `${subject} tracked / on-device` : state === 'searching' ? `Camera on / finding ${searching}` : pending ? 'Starting camera / local processing' : 'Pointer / touch'
   cameraError.hidden = !message; cameraError.textContent = message || ''
   icons()
 })
+document.querySelectorAll<HTMLInputElement>('input[name="tracking-mode"]').forEach(input => input.addEventListener('change', () => {
+  if (!input.checked || cameraOnly()) return
+  tracker?.setMode(input.value === 'face' ? 'face' : 'body')
+}))
 cameraButton.addEventListener('click', () => {
   if (tracker && ['starting', 'tracking', 'searching'].includes(tracker.state)) tracker.stop()
   else { setAuto(false); void tracker?.start() }
